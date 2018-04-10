@@ -45,6 +45,8 @@ BuildRequires:  libtool
 %description
 Connection Manager provides a daemon for managing Internet connections
 within embedded devices running the Linux operating system.
+Touches for jb40554:
+1
 
 %package wait-online
 Summary:    Wait for network to be configured by ConnMan
