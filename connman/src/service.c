@@ -2097,18 +2097,7 @@ static void default_changed(void)
 	if (service == current_default) {
 		DBG("default not changed %p %s",
 			service, service ? service->identifier : "NULL");
-
-		/*
-		 * Run auto connect for VPNs when the service is connected. In
-		 * case the service is still ready state the delayed connection
-		 * of VPN must be started here.
-		 */
-		if (service && is_connected(service) &&
-			service->type != CONNMAN_SERVICE_TYPE_VPN) {
-			DBG("running vpn_auto_connect");
-			vpn_auto_connect();
-		}
-		return;
+		goto notify;
 	}
 
 	/*
@@ -2120,7 +2109,7 @@ static void default_changed(void)
 
 		if (service == current_default) {
 			DBG("new connected default route == current_default");
-			return;
+			goto notify;
 		}
 	}
 
@@ -2144,7 +2133,7 @@ static void default_changed(void)
 
 			if (service == current_default) {
 				DBG("Selected new default == current_default");
-				return;
+				goto notify;
 			}
 
 			DBG("Selected new default service %s",
@@ -2293,6 +2282,7 @@ change:
 			CONNMAN_SERVICE_CONNECT_REASON_AUTO);
 	}
 
+notify:
 	__connman_notifier_default_changed(service);
 }
 
