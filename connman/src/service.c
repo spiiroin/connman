@@ -2097,7 +2097,7 @@ static void default_changed(void)
 	if (service == current_default) {
 		DBG("default not changed %p %s",
 			service, service ? service->identifier : "NULL");
-		goto notify;
+		return;
 	}
 
 	/*
@@ -2109,7 +2109,7 @@ static void default_changed(void)
 
 		if (service == current_default) {
 			DBG("new connected default route == current_default");
-			goto notify;
+			return;
 		}
 	}
 
@@ -2133,7 +2133,7 @@ static void default_changed(void)
 
 			if (service == current_default) {
 				DBG("Selected new default == current_default");
-				goto notify;
+				return;
 			}
 
 			DBG("Selected new default service %s",
@@ -2272,7 +2272,6 @@ static void default_changed(void)
 			CONNMAN_SERVICE_CONNECT_REASON_AUTO);
 	}
 
-notify:
 	__connman_notifier_default_changed(service);
 }
 
