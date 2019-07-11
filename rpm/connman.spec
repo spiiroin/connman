@@ -188,7 +188,7 @@ This package provides Cisco3000 (VPNC) VPN plugin for connman.
     --enable-sailfish-counters \
     --enable-globalproxy \
     --disable-gadget \
-    --with-systemdunitdir=/%{_lib}/systemd/system \
+    --with-systemdunitdir=/usr/lib/systemd/system \
     --enable-systemd \
     --with-tmpfilesdir=%{_libdir}/tmpfiles.d
 
@@ -210,11 +210,11 @@ cp -a tools/wispr %{buildroot}%{_libdir}/%{name}/tools
 mkdir -p %{buildroot}%{_sysconfdir}/connman/
 cp -a %{SOURCE1} %{buildroot}%{_sysconfdir}/connman/
 
-mkdir -p %{buildroot}/%{_lib}/systemd/system/network.target.wants
-ln -s ../connman.service %{buildroot}/%{_lib}/systemd/system/network.target.wants/connman.service
+mkdir -p %{buildroot}/%{_libdir}/systemd/system/network.target.wants
+ln -s ../connman.service %{buildroot}/%{_libdir}/systemd/system/network.target.wants/connman.service
 
-mkdir -p %{buildroot}/%{_lib}/systemd/system/connman.service.d
-cp -a %{SOURCE2} %{buildroot}/%{_lib}/systemd/system/connman.service.d/
+mkdir -p %{buildroot}/%{_libdir}/systemd/system/connman.service.d
+cp -a %{SOURCE2} %{buildroot}/%{_libdir}/systemd/system/connman.service.d/
 
 mkdir -p %{buildroot}/%{_docdir}/%{name}-%{version}
 install -m0644 -t %{buildroot}/%{_docdir}/%{name}-%{version} \
@@ -264,15 +264,15 @@ systemctl daemon-reload || :
 %dir %{_libdir}/%{name}/plugins-vpn
 %{_libdir}/tmpfiles.d/connman_resolvconf.conf
 %config %{_sysconfdir}/dbus-1/system.d/*.conf
-/%{_lib}/systemd/system/connman.service
-/%{_lib}/systemd/system/network.target.wants/connman.service
-/%{_lib}/systemd/system/connman-vpn.service
-/%{_lib}/systemd/system/connman.service.d
-/%{_datadir}/dbus-1/system-services/net.connman.vpn.service
+%{_libdir}/systemd/system/connman.service
+%{_libdir}/systemd/system/network.target.wants/connman.service
+%{_libdir}/systemd/system/connman-vpn.service
+%{_libdir}/systemd/system/connman.service.d
+%{_datadir}/dbus-1/system-services/net.connman.vpn.service
 
 %files wait-online
 %{_sbindir}/connmand-wait-online
-/%{_lib}/systemd/system/connman-wait-online.service
+%{_libdir}/systemd/system/connman-wait-online.service
 
 %files devel
 %defattr(-,root,root,-)
@@ -331,4 +331,3 @@ systemctl daemon-reload || :
 %defattr(-,root,root,-)
 %license COPYING
 %{_libdir}/%{name}/plugins-vpn/vpnc.so
-
