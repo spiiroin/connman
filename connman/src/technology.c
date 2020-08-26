@@ -490,6 +490,73 @@ done:
 	return;
 }
 
+static void technology_update(struct connman_technology *technology)
+{
+	GKeyFile *keyfile;
+	GError *error = NULL;
+	gchar *identifier = NULL;
+	bool enable, tethering;
+
+	DBG("");
+
+	/* If we fail to read keyfile or parameters let's make sure that we
+	 * don't leak user password in multiuser environment. Set parameters
+	 * to default before update.
+	 */
+	if (technology->type == CONNMAN_SERVICE_TYPE_ETHERNET)
+		technology->enable_persistent = true;
+	else
+		technology->enable_persistent = false;
+
+	technology->tethering_persistent = false;
+
+	g_free(technology->tethering_ident);
+	technology->tethering_ident = NULL;
+
+	g_free(technology->tethering_passphrase);
+	technology->tethering_passphrase = NULL;
+
+	/* Update technology */
+
+	keyfile = __connman_storage_load_global();
+	if (!keyfile)
+		goto failed;
+
+	identifier = g_strdup(get_name(technology->type));
+	if (!identifier)
+		goto failed;
+
+	enable = g_key_file_get_boolean(keyfile, identifier, "Enable", &error);
+	if (error)
+		goto failed;
+
+	tethering = g_key_file_get_boolean(keyfile, identifier, "Tethering",
+				&error);
+	if (error)
+		goto failed;
+
+	technology->enable_persistent = enable;
+	technology->tethering_persistent = tethering;
+
+	g_free(technology->tethering_ident);
+
+	technology->tethering_ident = g_key_file_get_string(keyfile, identifier,
+				"Tethering.Identifier", NULL);
+
+	g_free(technology->tethering_passphrase);
+
+	technology->tethering_passphrase = g_key_file_get_string(keyfile, identifier,
+				"Tethering.Passphrase", NULL);
+
+failed:
+	g_free(error);
+	g_free(identifier);
+	if (keyfile)
+		g_key_file_unref(keyfile);
+
+	return;
+}
+
 bool __connman_technology_get_offlinemode(void)
 {
 	return global_offlinemode;
@@ -1950,6 +2017,12 @@ bool __connman_technology_enable_from_config()
 
 	for (list = technology_list; list; list = list->next) {
 		struct connman_technology *technology = list->data;
+
+		/*
+		 * Update technology before make changes or save it to file.
+		 * Othervice we may overwrite user's settings with default ones.
+		 */
+		technology_update(technology);
 
 		identifier = get_name(technology->type);
 		if (!identifier)
