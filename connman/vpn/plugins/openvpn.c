@@ -79,7 +79,7 @@ struct {
 	{ "OpenVPN.TLSAuthDir", NULL, 1 },
 	{ "OpenVPN.Cipher", "--cipher", 1 },
 	{ "OpenVPN.Auth", "--auth", 1 },
-	{ "OpenVPN.CompLZO", "--comp-lzo", 0 },
+	{ "OpenVPN.CompLZO", "--comp-lzo", 1 },
 	{ "OpenVPN.RemoteCertTls", "--remote-cert-tls", 1 },
 	{ "OpenVPN.ConfigFile", "--config", 1 },
 	{ "OpenVPN.DeviceType", NULL, 1 },
