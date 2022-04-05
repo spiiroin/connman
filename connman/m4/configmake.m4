@@ -10,6 +10,8 @@ AC_DEFUN([gl_CONFIGMAKE_PREP],
 [
   dnl Added in autoconf 2.70
   if test "x$runstatedir" = x; then
-    AC_SUBST([runstatedir], ['${localstatedir}/run'])
+    # Note: configure script does not support --runstatedir=xxx
+    #AC_SUBST([runstatedir], ['${localstatedir}/run'])
+    AC_SUBST([runstatedir], ['/run'])
   fi
 ])
