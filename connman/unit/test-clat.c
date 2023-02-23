@@ -772,6 +772,18 @@ struct connman_network *connman_service_get_network(
 	return service->network;
 }
 
+char **connman_service_get_nameservers(struct connman_service *service)
+{
+	char **nss = NULL;
+
+	nss = g_new0(char*, 2);
+	nss[0] = g_strdup("4.4.4.4");
+	nss[1] = g_strdup("8.8.8.8");
+	nss[2] = NULL;
+
+	return nss;
+}
+
 struct _GResolv {
 	int index;
 	GResolvResultFunc result_func;
