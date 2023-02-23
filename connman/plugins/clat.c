@@ -1035,7 +1035,8 @@ static int clat_task_do_prefix_query(struct clat_data *data)
 
 	data->resolv_query_id = 0;
 
-	if (!has_nameservers_set(data->service)) {
+	if (data->state == CLAT_STATE_IDLE &&
+					!has_nameservers_set(data->service)) {
 		DBG("service %p has no nameservers set yet, try again in 1s",
 								data->service);
 
@@ -1068,6 +1069,7 @@ static int clat_task_do_prefix_query(struct clat_data *data)
 static gboolean run_prefix_query(gpointer user_data)
 {
 	struct clat_data *data = user_data;
+	int err;
 
 	DBG("");
 
@@ -1076,8 +1078,9 @@ static gboolean run_prefix_query(gpointer user_data)
 
 	data->prefix_query_id = 0;
 
-	if (clat_task_do_prefix_query(data)) {
-		DBG("failed to run prefix query");
+	err = clat_task_do_prefix_query(data);
+	if (err) {
+		DBG("failed to run prefix query: %d", err);
 		return G_SOURCE_REMOVE;
 	}
 
@@ -1667,7 +1670,7 @@ static int clat_run_task(struct clat_data *data)
 		data->state = CLAT_STATE_PREFIX_QUERY;
 		/* Get the prefix from the ISP NAT service */
 		err = clat_task_do_prefix_query(data);
-		if (err && err != -EALREADY) {
+		if (err && err != -EALREADY && err != -EINPROGRESS) {
 			connman_error("CLAT failed to start prefix query");
 			break;
 		}
