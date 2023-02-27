@@ -37,6 +37,8 @@
 static char *default_interface = NULL;
 static struct connman_service *default_service = NULL;
 static GHashTable *nat_hash;
+static int nat_ipv4_refcount = 0;
+static int nat_ipv6_refcount = 0;
 
 struct connman_nat {
 	int family;
@@ -60,16 +62,21 @@ struct connman_nat {
 
 static int enable_ip_forward(int family, bool enable)
 {
+	static char ipv4_value = 0;
+	static char ipv6_value = 0;
+	char *value;
 	const char *path;
-	static char value = 0;
-	int f, err = 0;
+	int f;
+	int err = 0;
 
 	switch (family) {
 	case AF_INET:
 		path = IPv4_FORWARD;
+		value = &ipv4_value;
 		break;
 	case AF_INET6:
 		path = IPv6_FORWARD;
+		value = &ipv6_value;
 		break;
 	default:
 		return -EINVAL;
@@ -78,12 +85,15 @@ static int enable_ip_forward(int family, bool enable)
 	if ((f = open(path, O_CLOEXEC | O_RDWR)) < 0)
 		return -errno;
 
-	if (!value) {
-		if (read(f, &value, sizeof(value)) < 0)
-			value = 0;
+	if (!*value) {
+		if (read(f, value, sizeof(*value)) < 0)
+			*value = 0;
 
 		if (lseek(f, 0, SEEK_SET) < 0)
 			return -errno;
+
+		DBG("read old IPv%s value %c", family == AF_INET ? "4" : "6",
+									*value);
 	}
 
 	if (enable) {
@@ -94,13 +104,16 @@ static int enable_ip_forward(int family, bool enable)
 	} else {
 		char deny = '0';
 
-		if (value)
-			deny = value;
+		if (*value) {
+			DBG("restore old IPv%s value %c", family == AF_INET ?
+							"4" : "6", *value);
+			deny = *value;
+		}
 
 		if (write(f, &deny, sizeof(deny)) < 0)
 			err = -errno;
 
-		value = 0;
+		*value = 0;
 	}
 
 	close(f);
@@ -186,12 +199,20 @@ int __connman_nat_enable(const char *name, const char *address,
 	struct connman_nat *nat;
 	int err;
 
-	DBG("");
+	DBG("name %s refcount %d", name, nat_ipv4_refcount);
 
-	if (g_hash_table_size(nat_hash) == 0) {
+	/* Enable IP forward only when this is the first to do so */
+	if (__sync_fetch_and_add(&nat_ipv4_refcount, 1) == 0) {
+		DBG("Enable IPv4 forward");
+
 		err = enable_ip_forward(AF_INET, true);
-		if (err < 0)
+		if (err < 0) {
+			connman_error("Failed to enable IPv4 forward: %d/%s",
+							err, strerror(-err));
 			return err;
+		}
+	} else {
+		DBG("IPv4 forward already enabled");
 	}
 
 	nat = g_try_new0(struct connman_nat, 1);
@@ -214,8 +235,20 @@ int __connman_nat_enable(const char *name, const char *address,
 err:
 	free_nat(nat);
 
-	if (g_hash_table_size(nat_hash) == 0)
-		enable_ip_forward(AF_INET, false);
+	switch (__sync_sub_and_fetch(&nat_ipv4_refcount, 1)) {
+	case 0:
+		DBG("Failed to setup nat, disable IPv4 forward");
+
+		err = enable_ip_forward(AF_INET, false);
+		if (err)
+			connman_error("Failed to disable IPv4 forward: %d/%s",
+							err, strerror(-err));
+	case -1:
+		nat_ipv4_refcount = 0;
+		break;
+	default:
+		break;
+	}
 
 	return -ENOMEM;
 }
@@ -223,6 +256,9 @@ err:
 void __connman_nat_disable(const char *name)
 {
 	struct connman_nat *nat;
+	int err;
+
+	DBG("name %s refcount %d", name, nat_ipv4_refcount);
 
 	nat = g_hash_table_lookup(nat_hash, name);
 	if (!nat)
@@ -237,8 +273,20 @@ void __connman_nat_disable(const char *name)
 
 	g_hash_table_remove(nat_hash, name);
 
-	if (g_hash_table_size(nat_hash) == 0)
-		enable_ip_forward(AF_INET, false);
+	/* Disable IP forward for IPv4 only when doing it as last */
+	switch (__sync_sub_and_fetch(&nat_ipv4_refcount, 1)) {
+	case 0:
+		DBG("Disable IPv4 forward");
+		err = enable_ip_forward(AF_INET, false);
+		if (err)
+			connman_error("Failed to disable IPv4 forward: %d/%s",
+							err, strerror(-err));
+	case -1:
+		nat_ipv4_refcount = 0;
+		break;
+	default:
+		break;
+	}
 }
 
 static void set_original_ipv6_values(struct connman_nat *nat)
@@ -251,9 +299,20 @@ static void set_original_ipv6_values(struct connman_nat *nat)
 
 	DBG("nat %p ipconfig %p", nat, nat->ipv6config);
 
-	err = enable_ip_forward(AF_INET6, false);
-	if (err)
-		connman_warn("Failed to disable IPv6 forwarding: %d", err);
+	switch (__sync_sub_and_fetch(&nat_ipv6_refcount, 1)) {
+	case 0:
+		DBG("Disabling IPv6 forward");
+
+		err = enable_ip_forward(AF_INET6, false);
+		if (err)
+			connman_warn("Failed to disable IPv6 forwarding: %d",
+									err);
+	case -1:
+		nat_ipv6_refcount = 0;
+		break;
+	default:
+		break;
+	}
 
 	if (nat->ipv6_accept_ra != -1)
 		__connman_ipconfig_ipv6_set_accept_ra(nat->ipv6config,
@@ -330,10 +389,16 @@ int connman_nat6_prepare(struct connman_ipconfig *ipconfig,
 		goto err;
 	}
 
-	err = enable_ip_forward(AF_INET6, true);
-	if (err) {
-		connman_error("failed to set IPv6 forwarding: %d", err);
-		goto err;
+	if (__sync_fetch_and_add(&nat_ipv6_refcount, 1) == 0) {
+		DBG("Enable IPv6 forward");
+
+		err = enable_ip_forward(AF_INET6, true);
+		if (err) {
+			connman_error("failed to set IPv6 forwarding: %d", err);
+			goto err;
+		}
+	} else {
+		DBG("IPv6 forward already enabled");
 	}
 
 	index = __connman_ipconfig_get_index(nat->ipv6config);
@@ -590,6 +655,8 @@ int __connman_nat_init(void)
 	nat_hash = g_hash_table_new_full(g_str_hash, g_str_equal,
 						g_free, cleanup_nat);
 
+	nat_ipv4_refcount = nat_ipv6_refcount = 0;
+
 	return 0;
 }
 
@@ -604,6 +671,7 @@ void __connman_nat_cleanup(void)
 	g_hash_table_foreach(nat_hash, shutdown_nat, NULL);
 	g_hash_table_destroy(nat_hash);
 	nat_hash = NULL;
+	nat_ipv4_refcount = nat_ipv6_refcount = 0;
 
 	connman_notifier_unregister(&nat_notifier);
 }
