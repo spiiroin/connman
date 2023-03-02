@@ -772,11 +772,16 @@ struct connman_network *connman_service_get_network(
 	return service->network;
 }
 
+static bool __service_nameservers_set = true;
+
 char **connman_service_get_nameservers(struct connman_service *service)
 {
-	char **nss = NULL;
+	char **nss;
 
-	nss = g_new0(char*, 2);
+	if (!__service_nameservers_set)
+		return NULL;
+
+	nss = g_new0(char*, 3);
 	nss[0] = g_strdup("4.4.4.4");
 	nss[1] = g_strdup("8.8.8.8");
 	nss[2] = NULL;
@@ -1434,6 +1439,8 @@ static void test_reset(void) {
 	__io_status = G_IO_STATUS_NORMAL;
 	g_free(__io_str);
 	__io_str = NULL;
+
+	__service_nameservers_set = true;
 }
 
 #define TEST_PREFIX "/clat/"
@@ -2139,6 +2146,132 @@ static void clat_plugin_test7()
 	test_reset();
 }
 
+/* Service has not nameservers set yet when trying to connect -> retry */
+static void clat_plugin_test8()
+{
+	struct connman_network network = {
+			.index = SERVICE_DEV_INDEX,
+	};
+	struct connman_ipconfig ipv6config = {
+			.type = CONNMAN_IPCONFIG_TYPE_IPV6,
+			.method = CONNMAN_IPCONFIG_METHOD_AUTO,
+	};
+	struct connman_service service = {
+			.type = CONNMAN_SERVICE_TYPE_CELLULAR,
+			.state = CONNMAN_SERVICE_STATE_UNKNOWN,
+	};
+	enum connman_service_state state;
+
+	DBG("");
+
+	service.network = &network;
+	service.ipconfig_ipv6 = &ipv6config;
+	network.ipv6_configured = true;
+	assign_ipaddress(&ipv6config);
+
+	g_assert(__connman_builtin_clat.init() == 0);
+
+	g_assert(n);
+	g_assert(r);
+	g_assert_true(rtprot_ra);
+
+	for (state = CONNMAN_SERVICE_STATE_UNKNOWN;
+					state <= CONNMAN_SERVICE_STATE_READY;
+					state++) {
+		service.state = state;
+		if (state == CONNMAN_SERVICE_STATE_READY)
+			network.connected = true;
+
+		n->service_state_changed(&service, state);
+		g_assert_null(__task);
+		g_assert_null(__resolv);
+	}
+
+	DBG("Cellular as default but no nameservers set");
+	__service_nameservers_set = false;
+	__def_service = &service;
+	n->default_changed(&service);
+	g_assert_cmpint(__task_run_count, ==, 0);
+
+	/* Query is not made but there is a timeout task */
+	DBG("Redo query");
+	g_assert_null(__resolv);
+	g_assert_null(__last_set_contents_write);
+	g_assert_cmpint(call_all_timeouts_timed(), ==, 1);
+
+	/* Which does not yet trigger a resolv as no nameservers are set */
+	DBG("No resolv triggered");
+	g_assert_null(__resolv);
+	g_assert_null(__last_set_contents_write);
+	g_assert_cmpint(pending_timeouts(), ==, 1);
+	g_assert_cmpint(__task_run_count, ==, 0);
+
+	/*
+	 * After enabling the nameservers the query is made and returing with
+	 * a success CLAT starts.
+	 */
+	DBG("Nameservers set, query will be done");
+	__service_nameservers_set = true;
+	g_assert_cmpint(call_all_timeouts_timed(), ==, 1);
+
+	g_assert(__resolv);
+	g_assert_null(__last_set_contents_write);
+	call_resolv_result(G_RESOLV_RESULT_STATUS_SUCCESS);
+
+	/* This transitions state to pre-configure */
+	g_assert_true(check_task_running(TASK_SETUP_PRE, 0));
+
+	/* GResolv removal is added in addition to query, call it */
+	g_assert(__timeouts);
+	g_assert_cmpint(call_all_timeouts_timed(), ==, 2);
+	g_assert(__resolv); /* New is set */
+	g_assert_null(__dad_callback);
+
+	/* State transition to running */
+	DBG("PRE CONFIGURE stops");
+	call_task_exit(0);
+	g_assert_true(check_task_running(TASK_SETUP_CONF, 0));
+
+	/* Callbacks are added, called and then re-added */
+	g_assert_cmpint(call_all_timeouts_timed(), ==, 2);
+
+	g_assert(__resolv);
+	g_assert(__dad_callback);
+	g_assert_true(call_dad_callback());
+
+	/* There should be always 2 callbacks, prefix query and DAD */
+	g_assert_cmpint(pending_timeouts(), ==, 2);
+
+	/* State transition to post-configure */
+	DBG("RUNNING STOPS");
+	call_task_exit(0);
+
+	g_assert_true(check_task_running(TASK_SETUP_POST, 0));
+
+	/* Timeouts are removed */
+	g_assert_cmpint(pending_timeouts(), ==, 0);
+	g_assert_null(__resolv);
+	g_assert_null(__dad_callback);
+
+	/* Task is ended */
+	DBG("POST CONFIGURE stops");
+	call_task_exit(0);
+
+	g_assert_false(check_task_running(TASK_SETUP_STOPPED, 0));
+	g_assert_cmpint(pending_timeouts(), ==, 0);
+	g_assert_null(__resolv);
+	g_assert_null(__dad_callback);
+
+	__connman_builtin_clat.exit();
+
+	connman_ipaddress_free(ipv6config.ipaddress);
+
+	g_assert_false(rtprot_ra);
+	g_assert_null(n);
+	g_assert_null(r);
+	test_reset();
+}
+
 // service goes online -> failure when online
 static void clat_plugin_test_failure1()
 {
@@ -2685,18 +2818,23 @@ static void clat_plugin_test_failure6()
 	/*
 	 * Do each status individually by first going online, then default,
 	 * then report status, then leave as default and go ready as in normal
-	 * use.
+	 * use. Ugly as hell but... works.
 	 */
 	for (status = G_RESOLV_RESULT_STATUS_ERROR;
 			status <= G_RESOLV_RESULT_STATUS_NO_ANSWER;
 			status == G_RESOLV_RESULT_STATUS_NO_RESPONSE &&
 				gresolv_timeouts < 6 ?
 				status = G_RESOLV_RESULT_STATUS_NO_RESPONSE :
-				status++) {
+				(status == G_RESOLV_RESULT_STATUS_NO_ANSWER &&
+					gresolv_timeouts < 6 ?
+				status = G_RESOLV_RESULT_STATUS_NO_ANSWER :
+				status++)) {
 		DBG("test resolv result status %d", status);
 
-		if (status == G_RESOLV_RESULT_STATUS_NO_RESPONSE + 1)
+		if (status == G_RESOLV_RESULT_STATUS_NO_RESPONSE + 1) {
 			g_assert_cmpint(gresolv_timeouts, ==, 6);
+			gresolv_timeouts = 0;
+		}
 
 		/* Nothing done as not being the default */
 		service.state = CONNMAN_SERVICE_STATE_ONLINE;
@@ -2726,7 +2864,8 @@ static void clat_plugin_test_failure6()
 		g_assert_false(check_task_running(TASK_SETUP_UNKNOWN, 0));
 		g_assert_cmpint(__task_run_count, ==, 0);
 
-		if (status == G_RESOLV_RESULT_STATUS_NO_RESPONSE) {
+		if (status == G_RESOLV_RESULT_STATUS_NO_RESPONSE ||
+				status == G_RESOLV_RESULT_STATUS_NO_ANSWER) {
 			gresolv_timeouts++;
 
 			DBG("retry case (timeout) #%d", gresolv_timeouts);
@@ -2786,6 +2925,9 @@ static void clat_plugin_test_failure6()
 		g_assert_null(__dad_callback);
 		g_assert_cmpint(pending_timeouts(), ==, timeout_count);
 	}
+
+	/* NO_ANSWER should be repeated as well in initial state */
+	g_assert_cmpint(gresolv_timeouts, ==, 6);
 
 	__connman_builtin_clat.exit();
 
@@ -4636,6 +4778,7 @@ int main (int argc, char *argv[])
 	g_test_add_func(TEST_PREFIX "test5", clat_plugin_test5);
 	g_test_add_func(TEST_PREFIX "test6", clat_plugin_test6);
 	g_test_add_func(TEST_PREFIX "test7", clat_plugin_test7);
+	g_test_add_func(TEST_PREFIX "test8", clat_plugin_test8);
 
 	g_test_add_func(TEST_PREFIX "test_failure1", clat_plugin_test_failure1);
 	g_test_add_func(TEST_PREFIX "test_failure2", clat_plugin_test_failure2);
