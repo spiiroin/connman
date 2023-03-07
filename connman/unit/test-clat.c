@@ -300,6 +300,8 @@ struct connman_task *connman_task_create(const char *program,
 					connman_task_setup_t custom_task_setup,
 					void *setup_data)
 {
+	DBG("");
+
 	g_assert(program);
 	g_assert_null(custom_task_setup);
 	g_assert_null(setup_data);
@@ -358,6 +360,7 @@ int connman_task_run(struct connman_task *task,
 
 	g_assert(task);
 	g_assert(task == __task);
+	g_assert_false(__task->running);
 
 	g_assert(function);
 	__task->exit_func = function;
@@ -387,6 +390,7 @@ int connman_task_stop(struct connman_task *task)
 	g_assert(task == __task);
 
 	if (task->running) {
+		DBG("task running");
 		task->running = false;
 
 		/* Allow to run exit only once from a process */
@@ -394,8 +398,11 @@ int connman_task_stop(struct connman_task *task)
 		task->exit_func = NULL;
 
 		if (exit_func) {
+			DBG("calling exit func");
 			exit_func(task, __task_exit_value, task->exit_data);
 		}
+	} else {
+		DBG("task not running");
 	}
 
 	return 0;
@@ -2721,7 +2728,7 @@ static void clat_plugin_test_failure5()
 
 	/* Error with resolv, process is stopped */
 	DBG("Resolv error NO_ANSWER");
-	call_resolv_result(G_RESOLV_RESULT_STATUS_NO_ANSWER);
+	call_resolv_result(G_RESOLV_RESULT_STATUS_SERVER_FAILURE);
 
 	/* State transition to post-configure */
 	DBG("RUNNING STOPS");
@@ -2755,6 +2762,19 @@ static void clat_plugin_test_failure5()
 	test_reset();
 }
 
+#define TIMEOUTS_MAX 6
+
+static GResolvResultStatus get_status(GResolvResultStatus status, int to)
+{
+	if (status == G_RESOLV_RESULT_STATUS_NO_RESPONSE && to < TIMEOUTS_MAX)
+		return G_RESOLV_RESULT_STATUS_NO_RESPONSE;
+
+	if (status == G_RESOLV_RESULT_STATUS_NO_ANSWER && to < TIMEOUTS_MAX)
+		return G_RESOLV_RESULT_STATUS_NO_ANSWER;
+
+	return ++status;
+}
+
 // loop over all resolv returns
 static void clat_plugin_test_failure6()
 {
@@ -2782,6 +2802,10 @@ static void clat_plugin_test_failure6()
 	};
 	enum connman_service_state state;
 	GResolvResultStatus status;
+	bool expect_resolv = false;
+	int timeout_count = 0;
+	int gresolv_timeouts = 0;
+
 
 	DBG("");
 
@@ -2811,28 +2835,18 @@ static void clat_plugin_test_failure6()
 		g_assert_null(__resolv);
 	}
 
-	bool expect_resolv = false;
-	int timeout_count = 0;
-	int gresolv_timeouts = 0;
-
 	/*
 	 * Do each status individually by first going online, then default,
 	 * then report status, then leave as default and go ready as in normal
-	 * use. Ugly as hell but... works.
+	 * use.
 	 */
 	for (status = G_RESOLV_RESULT_STATUS_ERROR;
 			status <= G_RESOLV_RESULT_STATUS_NO_ANSWER;
-			status == G_RESOLV_RESULT_STATUS_NO_RESPONSE &&
-				gresolv_timeouts < 6 ?
-				status = G_RESOLV_RESULT_STATUS_NO_RESPONSE :
-				(status == G_RESOLV_RESULT_STATUS_NO_ANSWER &&
-					gresolv_timeouts < 6 ?
-				status = G_RESOLV_RESULT_STATUS_NO_ANSWER :
-				status++)) {
+			status = get_status(status, gresolv_timeouts)) {
 		DBG("test resolv result status %d", status);
 
 		if (status == G_RESOLV_RESULT_STATUS_NO_RESPONSE + 1) {
-			g_assert_cmpint(gresolv_timeouts, ==, 6);
+			g_assert_cmpint(gresolv_timeouts, ==, TIMEOUTS_MAX);
 			gresolv_timeouts = 0;
 		}
 
@@ -2927,7 +2941,7 @@ static void clat_plugin_test_failure6()
 	}
 
 	/* NO_ANSWER should be repeated as well in initial state */
-	g_assert_cmpint(gresolv_timeouts, ==, 6);
+	g_assert_cmpint(gresolv_timeouts, ==, TIMEOUTS_MAX);
 
 	__connman_builtin_clat.exit();
 
@@ -2944,7 +2958,7 @@ static void clat_plugin_test_failure6()
  * Resolv returns timeout during initial query, then ok and then loops 7 times
  * with timeout resulting in error
  */
-static void clat_plugin_test_failure7()
+static void clat_plugin_test_failure7(gconstpointer data)
 {
 	struct connman_network network = {
 			.index = SERVICE_DEV_INDEX,
@@ -2958,9 +2972,10 @@ static void clat_plugin_test_failure7()
 			.state = CONNMAN_SERVICE_STATE_UNKNOWN,
 	};
 	enum connman_service_state state;
+	GResolvResultStatus status = GPOINTER_TO_INT(data);
 	int i;
 
-	DBG("");
+	DBG("status %d", status);
 
 	service.network = &network;
 	service.ipconfig_ipv6 = &ipv6config;
@@ -3033,11 +3048,11 @@ static void clat_plugin_test_failure7()
 	g_assert_cmpint(pending_timeouts(), ==, 2);
 
 	/* 6 timeouts is ok */
-	for (i = 0; i < 6 ; i++) {
+	for (i = 0; i < TIMEOUTS_MAX ; i++) {
 		DBG("timeout %d", i);
 
 		/* Timeout that adds new query with shorter interval */
-		call_resolv_result(G_RESOLV_RESULT_STATUS_NO_RESPONSE);
+		call_resolv_result(status);
 
 		/* Does not yet go off */ 
 		g_assert_true(check_task_running(TASK_SETUP_CONF, 0));
@@ -3053,9 +3068,9 @@ static void clat_plugin_test_failure7()
 		g_assert_cmpint(pending_timeouts(), ==, 2);
 	}
 
-	/* 7th makes process to stop */
-	DBG("Resolv error NO_RESPONSE");
-	call_resolv_result(G_RESOLV_RESULT_STATUS_NO_ANSWER);
+	/* TIMEOUTS_MAX + 1 makes process to stop */
+	DBG("Resolv error %d", status);
+	call_resolv_result(status);
 
 	/* State transition to post-configure */
 	DBG("RUNNING STOPS");
@@ -3093,7 +3108,7 @@ static void clat_plugin_test_failure7()
  * Resolv returns timeout during initial query, then ok and then loops 4 times
  * with timeout resulting in error
  */
-static void clat_plugin_test_failure8()
+static void clat_plugin_test_failure8(gconstpointer data)
 {
 	struct connman_network network = {
 			.index = SERVICE_DEV_INDEX,
@@ -3107,6 +3122,7 @@ static void clat_plugin_test_failure8()
 			.state = CONNMAN_SERVICE_STATE_UNKNOWN,
 	};
 	enum connman_service_state state;
+	GResolvResultStatus status = GPOINTER_TO_INT(data);
 	int i;
 
 	DBG("");
@@ -3181,12 +3197,12 @@ static void clat_plugin_test_failure8()
 	/* There should be always 2 callbacks, prefix query and DAD */
 	g_assert_cmpint(pending_timeouts(), ==, 2);
 
-	/* 4 timeouts */
+	/* 4 timeouts/errors */
 	for (i = 0; i < 4 ; i++) {
 		DBG("timeout %d", i);
 
-		/* Timeout that adds new query with shorter interval */
-		call_resolv_result(G_RESOLV_RESULT_STATUS_NO_RESPONSE);
+		/* Timeout/error that adds new query with shorter interval */
+		call_resolv_result(status);
 
 		/* Does not yet go off */ 
 		g_assert_true(check_task_running(TASK_SETUP_CONF, 0));
@@ -3367,7 +3383,7 @@ static void clat_plugin_test_restart1()
 	g_assert_cmpint(pending_timeouts(), ==, 2);
 
 	/* State transition to post-configure */
-	DBG("RUNNING STOPS");
+	DBG("RUNNING STOPS (after restart)");
 	call_task_exit(0);
 
 	g_assert_true(check_task_running(TASK_SETUP_POST, 1));
@@ -3377,7 +3393,7 @@ static void clat_plugin_test_restart1()
 	g_assert_null(__dad_callback);
 
 	/* Task is ended */
-	DBG("POST CONFIGURE stops");
+	DBG("POST CONFIGURE stops (after restart)");
 	call_task_exit(0);
 
 	g_assert_false(check_task_running(TASK_SETUP_STOPPED, 1));
@@ -4786,9 +4802,23 @@ int main (int argc, char *argv[])
 	g_test_add_func(TEST_PREFIX "test_failure4", clat_plugin_test_failure4);
 	g_test_add_func(TEST_PREFIX "test_failure5", clat_plugin_test_failure5);
 	g_test_add_func(TEST_PREFIX "test_failure6", clat_plugin_test_failure6);
-	g_test_add_func(TEST_PREFIX "test_failure7", clat_plugin_test_failure7);
-	g_test_add_func(TEST_PREFIX "test_failure8", clat_plugin_test_failure8);
-	
+	g_test_add_data_func(TEST_PREFIX "test_failure7_no_answer",
+				GINT_TO_POINTER(
+					G_RESOLV_RESULT_STATUS_NO_ANSWER),
+				clat_plugin_test_failure7);
+	g_test_add_data_func(TEST_PREFIX "test_failure7_no_response",
+				GINT_TO_POINTER(
+					G_RESOLV_RESULT_STATUS_NO_RESPONSE),
+				clat_plugin_test_failure7);
+	g_test_add_data_func(TEST_PREFIX "test_failure8_no_answer",
+				GINT_TO_POINTER(
+					G_RESOLV_RESULT_STATUS_NO_ANSWER),
+				clat_plugin_test_failure8);
+	g_test_add_data_func(TEST_PREFIX "test_failure8_no_response",
+				GINT_TO_POINTER(
+					G_RESOLV_RESULT_STATUS_NO_RESPONSE),
+				clat_plugin_test_failure8);
+
 	g_test_add_func(TEST_PREFIX "test_restart1", clat_plugin_test_restart1);
 	g_test_add_func(TEST_PREFIX "test_restart2", clat_plugin_test_restart2);
 
