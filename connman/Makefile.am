@@ -144,7 +144,7 @@ src_connmand_SOURCES = $(gdhcp_sources) $(gweb_sources) $(stats_sources) \
 			src/acd.c src/wakeup_timer.c src/fsid.c \
 			src/access.c vpn/vpn-settings.c vpn/vpn-util.c \
 			src/sailfish_iptables_ext.c src/iptables-validate.c \
-			src/login_manager.c
+			src/login_manager.c src/setting.c
 
 if SYSTEMD
 src_connmand_SOURCES += src/systemd_login.c
@@ -363,7 +363,8 @@ noinst_PROGRAMS += unit/test-access unit/test-ippool \
 	unit/test-sailfish_iptables_ext unit/test-service \
 	unit/test-globalproxy unit/test-firewall-iptables unit/test-iptables \
 	unit/test-device unit/test-vpn_access unit/test-sailfish_vpn_access \
-	unit/test-storage unit/test-systemd_login unit/test-vpn-util
+	unit/test-storage unit/test-systemd_login unit/test-vpn-util \
+	unit/test-setting
 
 if TEST_COVERAGE
 COVERAGE_OPT = --coverage
@@ -451,7 +452,7 @@ if XTABLES
 unit_test_firewall_iptables_SOURCES = $(backtrace_sources) src/connman.h \
 				src/log.c src/inotify.c src/dbus.c src/error.c \
 				src/inet.c src/iptables-validate.c \
-				unit/test-firewall-iptables.c
+				src/shared/util.c unit/test-firewall-iptables.c
 unit_test_firewall_iptables_LDADD = @GLIB_LIBS@ @DBUS_LIBS@ -ldl
 endif
 
@@ -491,12 +492,19 @@ unit_test_systemd_login_SOURCES = unit/test-systemd_login.c \
 				src/systemd_login.c
 unit_test_systemd_login_LDADD = @GLIB_LIBS@ -ldl
 
+unit_test_setting_CFLAGS = $(COVERAGE_OPT) $(AM_CFLAGS) \
+				-DDEFAULT_USER_STORAGE=\""$(userstorage)"\"
+unit_test_setting_SOURCES = unit/test-setting.c $(backtrace_sources) \
+				src/connman.h src/log.c src/setting.c \
+				src/config.c
+unit_test_setting_LDADD = @GLIB_LIBS@ -ldl
+
 TESTS = unit/test-access unit/test-vpn_access unit/test-ippool \
 	unit/test-sailfish_access unit/test-vpn-settings \
 	unit/test-sailfish_iptables_ext unit/test-service \
 	unit/test-globalproxy unit/test-firewall-iptables unit/test-iptables \
 	unit/test-device unit/test-sailfish_vpn_access unit/test-storage \
-	unit/test-systemd_login unit/test-vpn-util
+	unit/test-systemd_login unit/test-vpn-util unit/test-setting
 
 if SAILFISH_WAKEUP_TIMER
 unit_test_sailfish_wakeup_timer_CFLAGS = $(COVERAGE_OPT) $(AM_CFLAGS)
@@ -684,7 +692,7 @@ tools_iptables_unit_CFLAGS = @DBUS_CFLAGS@ @GLIB_CFLAGS@ @XTABLES_CFLAGS@ \
 tools_iptables_unit_SOURCES = $(backtrace_sources) src/log.c src/storage.c \
 		src/inotify.c src/iptables.c src/nat.c \
 		src/inet.c src/iptables-validate.c tools/iptables-unit.c \
-		src/error.c src/dbus.c
+		src/error.c src/dbus.c src/shared/util.c
 tools_iptables_unit_LDADD = @GLIB_LIBS@ @DBUS_LIBS@ @XTABLES_LIBS@ @LIBIPTC_LIBS@ -ldl
 
 tools_ip6tables_test_SOURCES = $(backtrace_sources) src/log.c \
