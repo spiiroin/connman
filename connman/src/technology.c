@@ -5,6 +5,7 @@
  *  Copyright (C) 2007-2013  Intel Corporation. All rights reserved.
  *  Copyright (C) 2014-2020  Jolla Ltd. All rights reserved.
  *  Copyright (C) 2020  Open Mobile Platform LLC.
+ *  Copyright (C) 2025  Jolla Mobile Ltd
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License version 2 as
@@ -1012,7 +1013,10 @@ static gboolean enable_delayed(gpointer user_data)
 
 	DBG("");
 
-	if (!technology || technology->enabled)
+	if (!technology)
+		return G_SOURCE_REMOVE;
+
+	if (technology->enabled)
 		goto out;
 
 	err = technology_enable(technology);
