@@ -3,6 +3,7 @@
  *  ConnMan VPN daemon
  *
  *  Copyright (C) 2007-2013  Intel Corporation. All rights reserved.
+ *  Copyright (C) 2025  Jolla Mobile Ltd
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License version 2 as
@@ -176,7 +177,8 @@ void vpn_died(struct connman_task *task, int exit_code, void *user_data)
 
 vpn_exit:
 	if (state != VPN_STATE_READY && state != VPN_STATE_DISCONNECT) {
-		if (vpn_data && vpn_data->vpn_driver->error_code)
+		if (vpn_data && vpn_data->vpn_driver &&
+					vpn_data->vpn_driver->error_code)
 			ret = vpn_data->vpn_driver->error_code(provider,
 					exit_code);
 		else
