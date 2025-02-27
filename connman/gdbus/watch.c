@@ -3,6 +3,7 @@
  *  D-Bus helper library
  *
  *  Copyright (C) 2004-2011  Marcel Holtmann <marcel@holtmann.org>
+ *  Copyright (C) 2025  Jolla Mobile Ltd
  *
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -332,7 +333,6 @@ static void filter_data_call_and_free(struct filter_data *data)
 			cb->disc_func(data->connection, cb->user_data);
 		if (cb->destroy_func)
 			cb->destroy_func(cb->user_data);
-		g_free(cb);
 	}
 
 	filter_data_free(data);
