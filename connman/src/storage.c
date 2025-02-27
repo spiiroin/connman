@@ -5,6 +5,7 @@
  *  Copyright (C) 2007-2013  Intel Corporation. All rights reserved.
  *  Copyright (C) 2019-2020  Jolla Ltd. All rights reserved.
  *  Copyright (C) 2020  Open Mobile Platform LLC.
+ *  Copyright (C) 2025  Jolla Mobile Ltd
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License version 2 as
@@ -402,8 +403,11 @@ static void storage_subdir_append(const char *name)
 	subdir->name = g_strdup(name);
 
 	storagedir = storagedir_for(subdir->name);
-	if (!storagedir)
+	if (!storagedir) {
+		g_free(subdir->name);
+		g_free(subdir);
 		return;
+	}
 
 	str = g_build_filename(storagedir, subdir->name, SETTINGS, NULL);
 	DBG("path %s", str);
