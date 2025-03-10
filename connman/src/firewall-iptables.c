@@ -5,6 +5,7 @@
  *  Copyright (C) 2013,2015  BMW Car IT GmbH.
  *  Copyright (C) 2018,2019  Jolla Ltd.
  *  Copyright (C) 2019  Open Mobile Platform LLC.
+ *  Copyright (C) 2025  Jolla Mobile Ltd
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License version 2 as
@@ -2363,7 +2364,7 @@ static int restore_policies(int family, char **policies, char **set_policies)
 
 	DBG("");
 
-	if (!policies && !set_policies)
+	if (!policies || !set_policies)
 		return -EINVAL;
 
 	for (i = NF_IP_LOCAL_IN; i < NF_IP_NUMHOOKS - 1; i++) {
