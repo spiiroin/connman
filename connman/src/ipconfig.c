@@ -3,6 +3,7 @@
  *  Connection Manager
  *
  *  Copyright (C) 2007-2013  Intel Corporation. All rights reserved.
+ *  Copyright (C) 2025  Jolla Mobile Ltd
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License version 2 as
@@ -285,8 +286,10 @@ static int read_conf_value(const char *prefix, const char *ifname,
 	int err;
 
 	path = g_build_filename(prefix, ifname ? ifname : "all", suffix, NULL);
-	if (!path)
+	if (!path) {
+		*value = -ENOMEM;
 		return -ENOMEM;
+	}
 
 	errno = 0;
 	f = fopen(path, "r");
@@ -297,7 +300,7 @@ static int read_conf_value(const char *prefix, const char *ifname,
 
 		err = fscanf(f, "%d", value);
 		if (err <= 0 && errno)
-			err = -errno;
+			*value = err = -errno;
 
 		fclose(f);
 	}
@@ -362,7 +365,7 @@ static int write_ipv6_conf_value(const char *ifname, const char *suffix,
 
 static bool get_ipv6_state(gchar *ifname)
 {
-	int disabled;
+	int disabled = 0;
 	bool enabled = false;
 
 	if (read_ipv6_conf_value(ifname, "disable_ipv6", &disabled) > 0)
@@ -382,7 +385,7 @@ static int set_ipv6_state(gchar *ifname, bool enable)
 
 static int get_ipv6_privacy(gchar *ifname)
 {
-	int value;
+	int value = 0;
 
 	if (!ifname)
 		return 0;
@@ -418,7 +421,7 @@ static int set_ipv6_autoconf(gchar *ifname, bool enable)
 
 static int get_rp_filter(void)
 {
-	int value;
+	int value = 0;
 
 	if (read_ipv4_conf_value(NULL, "rp_filter", &value) < 0)
 		value = -EINVAL;
@@ -463,7 +466,7 @@ static int set_ipv6_accept_ra(gchar *ifname, int value)
 
 static int get_ipv6_accept_ra(gchar *ifname)
 {
-	int value;
+	int value = 0;
 
 	if (read_ipv6_conf_value(ifname, "accept_ra", &value) < 0)
 		value = -EINVAL;
@@ -482,7 +485,7 @@ static int set_ipv6_ndproxy(gchar *ifname, bool enable)
 
 static int get_ipv6_ndproxy(gchar *ifname)
 {
-	int value;
+	int value = 0;
 
 	if (read_ipv6_conf_value(ifname, "proxy_ndp", &value) < 0)
 		value = -EINVAL;
