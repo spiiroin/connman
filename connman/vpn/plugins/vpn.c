@@ -532,7 +532,6 @@ static void vpn_task_setup(gpointer user_data)
 	DBG("vpn_task_setup uid:%d gid:%d supplementary group list size:%zu",
 					uid, gid, gid_list_size);
 
-
 	/* Change group if proper group name was set, requires CAP_SETGID.*/
 	if (gid > 0 && setgid(gid))
 		connman_error("error setting gid %d %s", gid, strerror(errno));
@@ -544,6 +543,8 @@ static void vpn_task_setup(gpointer user_data)
 	/* Change user for the task if set, requires CAP_SETUID */
 	if (uid > 0 && setuid(uid))
 		connman_error("error setting uid %d %s", uid, strerror(errno));
+
+	g_free(gid_list);
 }
 
 
