@@ -3,6 +3,7 @@
  *  Resolver library with GLib integration
  *
  *  Copyright (C) 2009-2013  Intel Corporation. All rights reserved.
+ *  Copyright (C) 2025  Jolla Mobile Ltd
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License version 2 as
@@ -159,6 +160,9 @@ static void _debug(GResolv *resolv, const char *file, const char *caller,
 
 static void destroy_query(struct resolv_query *query)
 {
+	if (!query)
+		return;
+
 	debug(query->resolv, "query %p timeout %d", query, query->timeout);
 
 	if (query->timeout > 0)
