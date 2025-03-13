@@ -4,6 +4,7 @@
  *
  *  Copyright (C) 2012-2013  Intel Corporation. All rights reserved.
  *  Copyright (C) 2019-2021  Jolla Ltd.
+ *  Copyright (C) 2025  Jolla Mobile Ltd
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License version 2 as
@@ -409,7 +410,7 @@ static int extract_ip(DBusMessageIter *array, int family,
 {
 	DBusMessageIter dict;
 	char *address = NULL, *gateway = NULL, *netmask = NULL, *peer = NULL;
-	unsigned char prefix_len;
+	unsigned char prefix_len = 128;
 
 	if (dbus_message_iter_get_arg_type(array) != DBUS_TYPE_ARRAY)
 		return -EINVAL;
@@ -491,8 +492,10 @@ static int extract_nameservers(DBusMessageIter *array,
 		DBG("[%d] %s", i, nameserver);
 
 		nameservers[i] = g_strdup(nameserver);
-		if (!nameservers[i])
+		if (!nameservers[i]) {
+			g_free(nameservers);
 			return -ENOMEM;
+		}
 
 		nameservers[++i] = NULL;
 

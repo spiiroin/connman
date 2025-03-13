@@ -3,6 +3,7 @@
  *  ConnMan VPN daemon
  *
  *  Copyright (C) 2007-2013  Intel Corporation. All rights reserved.
+ *  Copyright (C) 2025  Jolla Mobile Ltd
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License version 2 as
@@ -176,7 +177,8 @@ void vpn_died(struct connman_task *task, int exit_code, void *user_data)
 
 vpn_exit:
 	if (state != VPN_STATE_READY && state != VPN_STATE_DISCONNECT) {
-		if (vpn_data && vpn_data->vpn_driver->error_code)
+		if (vpn_data && vpn_data->vpn_driver &&
+					vpn_data->vpn_driver->error_code)
 			ret = vpn_data->vpn_driver->error_code(provider,
 					exit_code);
 		else
@@ -530,7 +532,6 @@ static void vpn_task_setup(gpointer user_data)
 	DBG("vpn_task_setup uid:%d gid:%d supplementary group list size:%zu",
 					uid, gid, gid_list_size);
 
-
 	/* Change group if proper group name was set, requires CAP_SETGID.*/
 	if (gid > 0 && setgid(gid))
 		connman_error("error setting gid %d %s", gid, strerror(errno));
@@ -542,6 +543,8 @@ static void vpn_task_setup(gpointer user_data)
 	/* Change user for the task if set, requires CAP_SETUID */
 	if (uid > 0 && setuid(uid))
 		connman_error("error setting uid %d %s", uid, strerror(errno));
+
+	g_free(gid_list);
 }
 
 
