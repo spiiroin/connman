@@ -493,7 +493,7 @@ static int extract_nameservers(DBusMessageIter *array,
 
 		nameservers[i] = g_strdup(nameserver);
 		if (!nameservers[i]) {
-			g_free(nameservers);
+			g_strfreev(nameservers);
 			return -ENOMEM;
 		}
 
