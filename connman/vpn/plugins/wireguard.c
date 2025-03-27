@@ -198,42 +198,27 @@ static int parse_allowed_ips(const char *allowed_ips, wg_peer *peer,
 	return 0;
 }
 
-static int parse_endpoint(const char *host, const char *port, struct sockaddr_u *addr)
+static int get_endpoint_addr(const char *host, const char *port, int flags,
+							struct sockaddr_u *addr)
 {
 	struct addrinfo hints;
-	struct addrinfo *result, *rp;
-	char **tokens;
+	struct addrinfo *result = NULL, *rp;
 	int sk;
 	int err;
-	unsigned int len;
-
-	/*
-	 * getaddrinfo() relies on inet_pton() that suggests using addresses
-	 * without CIDR notation. Host should contain the address in CIDR
-	 * notation to be able to pass the prefix length to ConnMan via D-Bus.
-	 */
-	tokens = g_strsplit(host, "/", -1);
-	len = g_strv_length(tokens);
-	if (len > 2 || len < 1) {
-		DBG("Failure tokenizing host %s", host);
-		g_strfreev(tokens);
-		return -EINVAL;
-	}
-
-	DBG("using host %s", tokens[0]);
 
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_DGRAM;
-	hints.ai_flags = 0;
+	hints.ai_flags = flags;
 	hints.ai_protocol = 0;
 
-	err = getaddrinfo(tokens[0], port, &hints, &result);
-	g_strfreev(tokens);
-
-	/* Any non-zero return from getaddrinfo is an error */
-	if (err) {
+	err = getaddrinfo(host, port, &hints, &result);
+	if (err) { /* Any non-zero return from getaddrinfo is an error */
 		DBG("Failed to resolve host address: %s", gai_strerror(err));
+
+		if (result)
+			freeaddrinfo(result);
+
 		return -EINVAL;
 	}
 
@@ -251,7 +236,8 @@ static int parse_endpoint(const char *host, const char *port, struct sockaddr_u 
 	}
 
 	if (!rp) {
-		DBG("no connectable address found in results");
+		DBG("no connectable address found in results: %s",
+							strerror(errno));
 		freeaddrinfo(result);
 		return -EHOSTUNREACH;
 	}
@@ -260,6 +246,98 @@ static int parse_endpoint(const char *host, const char *port, struct sockaddr_u 
 	freeaddrinfo(result);
 
 	return 0;
+}
+
+static const char *endpoint_to_str(struct wg_peer *peer, char *buf,
+							socklen_t len)
+{
+	struct sockaddr_u *addr;
+	int family;
+
+	addr = (struct sockaddr_u *)&peer->endpoint.addr;
+	family = peer->endpoint.addr.sa_family;
+
+	switch (family) {
+	case AF_INET:
+		return inet_ntop(family, &addr->sin.sin_addr, buf, len);
+	case AF_INET6:
+		return inet_ntop(family, &addr->sin6.sin6_addr, buf, len);
+	default:
+		break;
+	}
+
+	return NULL;
+}
+
+static int parse_endpoint_hostname(const char *host, const char *port,
+							struct wg_peer *peer,
+							char **gateway_resolved)
+{
+	struct sockaddr_u *addr;
+	char **tokens;
+	const char *gw = NULL;
+	char buf[INET6_ADDRSTRLEN] = { 0 };
+	unsigned int len;
+	int err;
+
+	/*
+	 * getaddrinfo() relies on inet_pton() that suggests using addresses
+	 * without CIDR notation. Host should contain the address in CIDR
+	 * notation to be able to pass the prefix length to ConnMan via D-Bus.
+	 */
+	tokens = g_strsplit(host, "/", -1);
+	len = g_strv_length(tokens);
+	if (len > 2 || len < 1) {
+		DBG("Failure tokenizing host %s", host);
+		g_strfreev(tokens);
+		return -EINVAL;
+	}
+
+	DBG("using host %s", tokens[0]);
+
+	addr = (struct sockaddr_u *)&peer->endpoint.addr;
+
+	err = get_endpoint_addr(tokens[0], port, 0, addr);
+	if (!err) {
+		/* In case the endpoint is an host address use the resolved
+		 * IP address as gateway for DNS over WireGuard to work.
+		 */
+		if (connman_inet_check_ipaddress(tokens[0]) <= 0)
+			gw = endpoint_to_str(peer, buf, INET6_ADDRSTRLEN);
+
+		DBG("success");
+	}
+
+	*gateway_resolved = gw ? g_strdup(gw) : g_strdup(tokens[0]);
+
+	g_strfreev(tokens);
+
+	return err;
+}
+
+static int parse_endpoint_results(char **results, const char *port,
+							struct sockaddr_u *addr)
+{
+	int err = 0;
+	int i;
+
+	if (!results) {
+		DBG("no results");
+		return -EINVAL;
+	}
+
+	for (i = 0; results[i]; i++) {
+		DBG("using host %s", results[i]);
+
+		/* Use getaddrinfo to fill in the structs after resolve */
+		err = get_endpoint_addr(results[i], port, AI_NUMERICHOST, addr);
+		if (!err) {
+			DBG("success");
+			return err;
+		}
+	}
+
+	return err;
 }
 
 struct wg_ipaddresses {
@@ -455,7 +533,7 @@ static void resolve_endpoint_cb(GResolvResultStatus status,
 {
 	struct wireguard_info *info = user_data;
 	struct sockaddr_u addr;
-	int err;
+	int err = 0;
 
 	DBG("");
 
@@ -487,6 +565,8 @@ static void resolve_endpoint_cb(GResolvResultStatus status,
 		DBG("resolv success, parse endpoint");
 		break;
 	/* request timeouts or an server issue is not an error, try again */
+	case G_RESOLV_RESULT_STATUS_NAME_ERROR: /* NXDOMAIN, might recover? */
+	case G_RESOLV_RESULT_STATUS_NO_ANSWER:
 	case G_RESOLV_RESULT_STATUS_NO_RESPONSE:
 	case G_RESOLV_RESULT_STATUS_SERVER_FAILURE:
 		DBG("retry DNS reresolve");
@@ -499,15 +579,12 @@ static void resolve_endpoint_cb(GResolvResultStatus status,
 	/* Consider these as non-continuable errors */
 	case G_RESOLV_RESULT_STATUS_ERROR:
 	case G_RESOLV_RESULT_STATUS_FORMAT_ERROR:
-	case G_RESOLV_RESULT_STATUS_NAME_ERROR:
 	case G_RESOLV_RESULT_STATUS_NOT_IMPLEMENTED:
 	case G_RESOLV_RESULT_STATUS_REFUSED:
-	case G_RESOLV_RESULT_STATUS_NO_ANSWER:
-		DBG("stop DNS reresolve");
-		if (info->provider)
+		DBG("stop DNS reresolve, error %d", status);
+		if (err && info->provider)
 			vpn_provider_add_error(info->provider,
 					VPN_PROVIDER_ERROR_CONNECT_FAILED);
-
 		return;
 	}
 
@@ -515,7 +592,7 @@ static void resolve_endpoint_cb(GResolvResultStatus status,
 	 * If this fails after being connected it means configuration error
 	 * that results in connection errors.
 	 */
-	err = parse_endpoint(info->endpoint_fqdn, info->port, &addr);
+	err = parse_endpoint_results(results, info->port, &addr);
 	if (err) {
 		if (info->provider)
 			vpn_provider_add_error(info->provider,
@@ -576,6 +653,7 @@ static gboolean wg_dns_reresolve_cb(gpointer user_data)
 	}
 
 	DBG("endpoint_fqdn %s", info->endpoint_fqdn);
+
 	info->resolv_id = vpn_util_resolve_hostname(info->resolv,
 						info->endpoint_fqdn,
 						resolve_endpoint_cb, info);
@@ -588,27 +666,6 @@ static gboolean wg_dns_reresolve_cb(gpointer user_data)
 	}
 
 	return G_SOURCE_REMOVE;
-}
-
-static const char *endpoint_to_str(struct wg_peer *peer, char *buf,
-							socklen_t len)
-{
-	struct sockaddr_u *addr;
-	int family;
-
-	addr = (struct sockaddr_u *)&peer->endpoint.addr;
-	family = peer->endpoint.addr.sa_family;
-
-	switch (family) {
-	case AF_INET:
-		return inet_ntop(family, &addr->sin.sin_addr, buf, len);
-	case AF_INET6:
-		return inet_ntop(family, &addr->sin6.sin6_addr, buf, len);
-	default:
-		break;
-	}
-
-	return NULL;
 }
 
 static gboolean wg_route_setup_cb(gpointer user_data)
@@ -626,9 +683,8 @@ static gboolean wg_route_setup_cb(gpointer user_data)
 	family = info->peer.endpoint.addr.sa_family;
 
 	if (!endpoint_to_str(&info->peer, endpoint, INET6_ADDRSTRLEN)) {
-		DBG("Faulty endpoint set, use endpoint_fqdn");
-		memcpy(&endpoint, info->endpoint_fqdn, INET6_ADDRSTRLEN);
-		family = connman_inet_check_ipaddress(info->endpoint_fqdn);
+		connman_warn("Cannot setup WireGuard routes, endpoint failure");
+		return G_SOURCE_REMOVE;
 	}
 
 	wg_for_each_allowedip(&info->peer, allowedip) {
@@ -709,11 +765,14 @@ static int wg_connect(struct vpn_provider *provider,
 {
 	struct wg_ipaddresses ipaddresses = { 0 };
 	struct wireguard_info *info;
-	const char *option, *gateway;
+	const char *option;
+	const char *endpoint;
+	char *gateway = NULL;
 	char *ifname;
 	bool do_split_routing = true;
 	bool disable_ipv6 = false;
 	int err = -EINVAL;
+	int family;
 
 	info = create_private_data(provider);
 
@@ -798,21 +857,20 @@ static int wg_connect(struct vpn_provider *provider,
 	if (!option)
 		option = "51820";
 
-	gateway = vpn_provider_get_string(provider, "Host");
+	endpoint = vpn_provider_get_string(provider, "Host");
 	/*
 	 * Use the resolve timeout only with re-resolve. Here the network
 	 * is setup as the transport is used. In succeeding attempts resolving
 	 * is needed as it is done over potentially misconfigured WireGuard
 	 * connection that may end up blocking vpnd with getaddrinfo().
 	 */
-	err = parse_endpoint(gateway, option,
-			(struct sockaddr_u *)&info->peer.endpoint.addr);
+	err = parse_endpoint_hostname(endpoint, option, &info->peer, &gateway);
 	if (err) {
-		DBG("Failed to parse endpoint %s:%s", gateway, option);
+		DBG("Failed to parse endpoint %s:%s", endpoint, option);
 		goto error;
 	}
 
-	info->endpoint_fqdn = g_strdup(gateway);
+	info->endpoint_fqdn = g_strdup(endpoint);
 	info->port = g_strdup(option);
 
 	option = vpn_provider_get_string(provider, "WireGuard.Address");
@@ -820,11 +878,14 @@ static int wg_connect(struct vpn_provider *provider,
 		DBG("Missing WireGuard.Address configuration");
 		goto error;
 	}
+
 	err = parse_addresses(option, gateway, &ipaddresses);
 	if (err) {
-		DBG("Failed to parse addresses %s gateway %s", option, gateway);
+		DBG("Failed to parse addresses %s endpoint %s gateway %s",
+						option, endpoint, gateway);
 		goto error;
 	}
+	g_free(gateway);
 
 	ifname = get_ifname();
 	if (!ifname) {
@@ -875,7 +936,13 @@ done:
 	connman_ipaddress_free(ipaddresses.ipaddress_ipv6);
 
 	if (!err) {
-		run_dns_reresolve(info);
+		/* Run DNS reresolve only for hostnames that require resolve. */
+		family = connman_inet_check_ipaddress(info->endpoint_fqdn);
+		if (family != AF_INET && family != AF_INET6) {
+			DBG("start DNS reresolve for %s", info->endpoint_fqdn);
+			run_dns_reresolve(info);
+		}
+
 		run_route_setup(info, ROUTE_SETUP_TIMEOUT);
 	}
 
