@@ -441,6 +441,17 @@ Properties	string State [readonly]
 
 				Default value is "disabled".
 
+			string SystemPrivacy [readonly]
+
+				This has the same values as the Privacy string
+				but is included only when the system default
+				IPv6 privacy is enabled via the configuration
+				option IPv6PrivacyUseSystemDefault and there
+				is no user override set for this service. This
+				indicates the currently used use_tempaddr value
+				from the system default, that is being also
+				applied to this service.
+
 		dict IPv6.Configuration [readwrite]
 
 			Same values as IPv6 property. The IPv6 represents
