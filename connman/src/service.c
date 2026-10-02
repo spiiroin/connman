@@ -10182,8 +10182,8 @@ static void set_ipv6_for_service(gpointer value, gpointer user_data)
 	 * it is being disconnected. This ensures that the interface it is/was
 	 * using is set to the previous state.
 	 */
-	if ((!is_connected(service->state || service == data->vpn) &&
-						service != data->transport))
+	if ((!is_connected(service->state) || service == data->vpn) &&
+						service != data->transport)
 		return;
 
 	DBG("%s service %p/%s", data->enable ? "enable" : "disable", service,
