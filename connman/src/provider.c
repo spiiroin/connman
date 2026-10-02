@@ -225,6 +225,15 @@ int __connman_provider_set_ipv6_for_connected(
 	case CONNMAN_SERVICE_TYPE_CELLULAR:
 	case CONNMAN_SERVICE_TYPE_WIFI:
 	case CONNMAN_SERVICE_TYPE_ETHERNET:
+		/*
+		 * When enabling ignore this check when IPv4 is not connected to
+		 * allow (re-)enabling IPv6 when the transport might be already
+		 * disconnected.
+		 */
+		if (enable && !__connman_service_is_connected_state(transport,
+						CONNMAN_IPCONFIG_TYPE_IPV4))
+			break;
+
 		tp_ipconfig = __connman_service_get_ip4config(transport);
 		if (!tp_ipconfig)
 			return 0;
