@@ -52,8 +52,10 @@ mask itself. The gateway can be omitted when using a static IP.
 IPv6 settings for the service. If set to \fBoff\fP, IPv6 won't be used.
 If set to \fBauto\fP, settings will be obtained from the network.
 .TP
-.B IPv6.Privacy=disabled \fR|\fB enabled \fR|\fB preferred
-IPv6 privacy settings as per RFC3041.
+.B IPv6.Privacy=disabled \fR|\fB enabled \fR|\fB preferred \fR|\fB system
+IPv6 privacy settings as per RFC3041, and the "system" is a ConnMan
+specific value. The value "system" makes the service to obey the OSs
+default setting for IPv6 privacy.
 .TP
 .BI MAC= address
 MAC address of the interface to be used. If not specified, the first
