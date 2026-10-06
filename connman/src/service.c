@@ -10181,6 +10181,19 @@ static void set_ipv6_for_service(gpointer value, gpointer user_data)
 	}
 
 	if (data->enable) {
+		/*
+		 * Ignore if IPv6 is not forced to be off on an already
+		 * disabled IPv6 to avoid enabling IPv6 on a service where it
+		 * should be set off by configuration.
+		 */
+		if (!__connman_ipconfig_ipv6_get_force_disabled(ipconfig) &&
+				__connman_ipconfig_get_method(ipconfig) ==
+					CONNMAN_IPCONFIG_METHOD_OFF) {
+			DBG("Ignore enabling IPv6 on service, IPv6 is set OFF "
+					"and is not force disabled");
+			return;
+		}
+
 		/* Restore the original method before enabling. */
 		__connman_ipconfig_ipv6_method_restore(ipconfig);
 
